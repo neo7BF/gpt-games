@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Space Invaders Semplificato • Static HTML</title>
+  <style>
+    :root {
+      --bg: #0b0f1a;
+      --fg: #e6edf3;
+      --accent: #7ee787;
+      --accent2: #79c0ff;
+      --warn: #ff7b72;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: radial-gradient(1200px 600px at 50% -20%, #0f1629 10%, var(--bg) 60%);
+      color: var(--fg);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif;
+    }
+    .wrap {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 16px;
+      display: grid;
+      gap: 12px;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    h1 { font-size: clamp(18px, 2.6vw, 22px); margin: 0; font-weight: 700; letter-spacing: .3px; }
+    .controls {
+      font-size: 12px;
+      opacity: .85;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .controls kbd {
+      background: #1f2637;
+      border: 1px solid #2d3650;
+      border-bottom-color: #1b2132;
+      padding: 2px 6px;
+      border-radius: 6px;
+      font-size: 11px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+    }
+
+    /* Canvas container with subtle frame */
+    .stage {
+      position: relative;
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow:
+        0 10px 30px rgba(0,0,0,.35),
+        inset 0 0 0 1px rgba(255,255,255,.04);
+      background: linear-gradient(#0c1222, #0a0f1b);
+      aspect-ratio: 16 / 9; /* mantiene proporzioni responsive */
+      min-height: 360px;    /* evita canvas troppo piccolo su mobile */
+    }
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      image-rendering: crisp-edges;
+      image-rendering: pixelated;
+    }
+
+    /* Overlay for pause / win / lose */
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      background: rgba(4, 8, 16, .58);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .2s ease;
+    }
+    .overlay.show { opacity: 1; pointer-events: auto; }
+    .card {
+      background: rgba(18, 24, 39, .9);
+      border: 1px solid rgba(255,255,255,.06);
+      border-radius: 16px;
+      padding: 18px 20px;
+      text-align: center;
+      width: min(90%, 420px);
+      box-shadow: 0 10px 30px rgba(0,0,0,.4);
+    }
+    .card h2 { margin: 0 0 8px; font-size: 20px; }
+    .card p { margin: 0 0 14px; font-size: 14px; opacity: .9; }
+    .btn {
+      appearance: none;
+      cursor: pointer;
+      border: 1px solid rgba(255,255,255,.12);
+      background: linear-gradient(#1a2540, #121a2e);
+      color: var(--fg);
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-weight: 600;
+      font-size: 14px;
+    }
+    .btn:active { transform: translateY(1px); }
+    footer {
+      font-size: 12px;
+      opacity: .8;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+    .pill {
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.1);
+      background: #11172a;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Space Invaders – versione semplificata (static HTML)</h1>
+      <div class="controls">
+        <span><kbd>←</kbd>/<kbd>→</kbd> o <kbd>A</kbd>/<kbd>D</kbd> per muovere</span>
+        <span><kbd>Space</kbd> per sparare</span>
+        <span><kbd>P</kbd> pausa</span>
+        <span><kbd>R</kbd> restart</span>
+      </div>
+    </header>
+
+    <div class="stage" id="stage">
+      <canvas id="game" width="900" height="506" aria-label="Space Invaders Canvas"></canvas>
+      <div class="overlay" id="overlay">
+        <div class="card">
+          <h2 id="stateTitle">Pausa</h2>
+          <p id="stateSubtitle">Premi <b>P</b> per riprendere, oppure ricomincia.</p>
+          <button class="btn" id="restartBtn">Ricomincia</button>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      <div class="pill" id="scorePill">Punteggio: 0</div>
+      <div class="pill" id="statusPill">Pronto</div>
+    </footer>
+  </div>
+
+  <script>
+    // === Utility helpers =====================================================
+    const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+    const now = () => performance.now();
+
+    // Axis-Aligned Bounding Box collision
+    function aabb(a, b) {
+      return (
+        a.x < b.x + b.w &&
+        a.x + a.w > b.x &&
+        a.y < b.y + b.h &&
+        a.y + a.h > b.y
+      );
+    }
+
+    // === Game constants (tunable) ============================================
+    const CONFIG = {
+      player: { w: 60, h: 14, speed: 380, color: "#7ee787" },
+      bullet: { w: 4, h: 12, speed: 640, maxActive: 3, color: "#79c0ff" },
+      alien:  { w: 36, h: 24, gapX: 24, gapY: 18, rows: 4, cols: 8,
+                color: "#ffb86b", color2: "#ffd28a" },
+      alienMove: { baseSpeed: 60, stepDown: 24, speedUpFactor: 1.06 },
+      boundsPadding: 14
+    };
+
+    // === Game state ==========================================================
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+    const overlay = document.getElementById("overlay");
+    const titleEl = document.getElementById("stateTitle");
+    const subtitleEl = document.getElementById("stateSubtitle");
+    const restartBtn = document.getElementById("restartBtn");
+    const scorePill = document.getElementById("scorePill");
+    const statusPill = document.getElementById("statusPill");
+
+    let gameState = "playing"; // playing | paused | won | lost
+    let keys = new Set();
+    let lastTime = now();
+
+    // Responsive canvas: fit container while keeping internal resolution
+    const stage = document.getElementById("stage");
+    const BASE_W = 900, BASE_H = 506; // 16:9-ish; matches canvas initial size
+
+    function resizeCanvasToStage() {
+      const rect = stage.getBoundingClientRect();
+      // Keep internal resolution proportional to displayed size for crispness
+      const ratio = BASE_W / BASE_H;
+      let w = rect.width, h = rect.height;
+      // Adjust to exact ratio (the .stage enforces it via CSS, so this is mostly aligned)
+      if (w / h > ratio) w = h * ratio; else h = w / ratio;
+      // Set drawing buffer size proportionally (limits to base to avoid huge buffers)
+      const scale = w / BASE_W;
+      canvas.width = Math.round(BASE_W * scale);
+      canvas.height = Math.round(BASE_H * scale);
+    }
+    resizeCanvasToStage();
+    window.addEventListener("resize", resizeCanvasToStage);
+
+    // Scale-aware sizes
+    function scaleVal(v) {
+      return v * (canvas.width / BASE_W);
+    }
+
+    // Entities
+    let player, bullets, aliens, score, alienDir, alienSpeed, alienBounds;
+
+    function initGame() {
+      score = 0;
+      alienDir = 1; // 1 => right, -1 => left
+      alienSpeed = CONFIG.alienMove.baseSpeed;
+
+      const margin = scaleVal(40);
+      player = {
+        w: scaleVal(CONFIG.player.w),
+        h: scaleVal(CONFIG.player.h),
+        x: (canvas.width - scaleVal(CONFIG.player.w)) / 2,
+        y: canvas.height - margin,
+        color: CONFIG.player.color
+      };
+      bullets = [];
+
+      // Build alien grid centered
+      aliens = [];
+      const aw = scaleVal(CONFIG.alien.w), ah = scaleVal(CONFIG.alien.h);
+      const gx = scaleVal(CONFIG.alien.gapX), gy = scaleVal(CONFIG.alien.gapY);
+      const totalW = CONFIG.alien.cols * aw + (CONFIG.alien.cols - 1) * gx;
+      const startX = (canvas.width - totalW) / 2;
+      const startY = scaleVal(60);
+      for (let r = 0; r < CONFIG.alien.rows; r++) {
+        for (let c = 0; c < CONFIG.alien.cols; c++) {
+          aliens.push({
+            x: startX + c * (aw + gx),
+            y: startY + r * (ah + gy),
+            w: aw, h: ah,
+            color: (r % 2 === 0) ? CONFIG.alien.color : CONFIG.alien.color2
+          });
+        }
+      }
+
+      // Track alien bounding box for edge checks
+      recomputeAlienBounds();
+
+      gameState = "playing";
+      setOverlay(false);
+      scorePill.textContent = `Punteggio: ${score}`;
+      statusPill.textContent = `Pronto`;
+    }
+
+    function recomputeAlienBounds() {
+      if (aliens.length === 0) {
+        alienBounds = { minX: 0, maxX: 0, maxY: 0 };
+        return;
+      }
+      let minX = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const a of aliens) {
+        if (a.x < minX) minX = a.x;
+        if (a.x + a.w > maxX) maxX = a.x + a.w;
+        if (a.y + a.h > maxY) maxY = a.y + a.h;
+      }
+      alienBounds = { minX, maxX, maxY };
+    }
+
+    // Input
+    window.addEventListener("keydown", (e) => {
+      if (["ArrowLeft","ArrowRight"," ","KeyA","KeyD","KeyP","KeyR"].includes(e.code)) {
+        e.preventDefault(); // avoid page scroll/spacebar scrolling
+      }
+      if (gameState === "won" || gameState === "lost") {
+        if (e.code === "KeyR") restart();
+        return;
+      }
+      if (e.code === "KeyP") togglePause();
+      else if (e.code === "KeyR") restart();
+      else if (e.code === "Space") shoot();
+      else keys.add(e.code);
+    });
+
+    window.addEventListener("keyup", (e) => {
+      keys.delete(e.code);
+    });
+
+    restartBtn.addEventListener("click", restart);
+
+    function togglePause() {
+      if (gameState === "playing") {
+        gameState = "paused";
+        setOverlay(true, "In pausa", "Premi P per riprendere, oppure ricomincia.");
+        statusPill.textContent = "Pausa";
+      } else if (gameState === "paused") {
+        gameState = "playing";
+        setOverlay(false);
+        statusPill.textContent = "In gioco";
+        lastTime = now(); // evita salto temporale
+      }
+    }
+
+    function restart() {
+      initGame();
+    }
+
+    function setOverlay(show, title = "Pausa", subtitle = "Premi P per riprendere, oppure ricomincia.") {
+      overlay.classList.toggle("show", !!show);
+      titleEl.textContent = title;
+      subtitleEl.innerHTML = subtitle;
+    }
+
+    function shoot() {
+      if (gameState !== "playing") return;
+      if (bullets.length >= CONFIG.bullet.maxActive) return;
+      bullets.push({
+        x: player.x + player.w / 2 - scaleVal(CONFIG.bullet.w) / 2,
+        y: player.y - scaleVal(10),
+        w: scaleVal(CONFIG.bullet.w),
+        h: scaleVal(CONFIG.bullet.h),
+        vy: -scaleVal(CONFIG.bullet.speed),
+        color: CONFIG.bullet.color
+      });
+    }
+
+    // Update loop
+    function update(dt) {
+      // Player movement
+      const speed = scaleVal(CONFIG.player.speed);
+      if (keys.has("ArrowLeft") || keys.has("KeyA")) {
+        player.x -= speed * dt;
+      } else if (keys.has("ArrowRight") || keys.has("KeyD")) {
+        player.x += speed * dt;
+      }
+      const pad = scaleVal(CONFIG.boundsPadding);
+      player.x = clamp(player.x, pad, canvas.width - player.w - pad);
+
+      // Bullets
+      for (const b of bullets) {
+        b.y += b.vy * dt;
+      }
+      bullets = bullets.filter(b => b.y + b.h > 0);
+
+      // Aliens movement (group-wise, edge check via bounds)
+      const step = scaleVal(alienSpeed) * dt * alienDir;
+      let needDescend = false;
+
+      // Predict bounds at next step
+      if (aliens.length > 0) {
+        const nextMinX = alienBounds.minX + step;
+        const nextMaxX = alienBounds.maxX + step;
+        const padX = scaleVal(CONFIG.boundsPadding);
+        if (nextMinX < padX || nextMaxX > canvas.width - padX) {
+          needDescend = true;
+          alienDir *= -1; // invert direction
+          // Speed up slightly as in classic games
+          alienSpeed *= CONFIG.alienMove.speedUpFactor;
+        }
+      }
+
+      // Apply movement
+      if (needDescend) {
+        const down = scaleVal(CONFIG.alienMove.stepDown);
+        for (const a of aliens) {
+          a.y += down;
+        }
+      } else {
+        for (const a of aliens) {
+          a.x += step;
+        }
+      }
+
+      // Recompute bounds after moving
+      recomputeAlienBounds();
+
+      // Check lose (aliens reached player level)
+      if (aliens.length > 0 && alienBounds.maxY >= player.y - scaleVal(4)) {
+        gameState = "lost";
+        setOverlay(true, "Sei stato invaso 👾", "Premi <b>R</b> o clicca <b>Ricomincia</b> per riprovare.");
+        statusPill.textContent = "Sconfitta";
+      }
+
+      // Collisions: bullets vs aliens
+      if (gameState === "playing") {
+        outer: for (let i = bullets.length - 1; i >= 0; i--) {
+          const b = bullets[i];
+          for (let j = aliens.length - 1; j >= 0; j--) {
+            const a = aliens[j];
+            if (aabb(b, a)) {
+              // hit!
+              bullets.splice(i, 1);
+              aliens.splice(j, 1);
+              score += 10;
+              scorePill.textContent = `Punteggio: ${score}`;
+              // Speed up slightly as aliens decrease
+              alienSpeed *= 1.01;
+              recomputeAlienBounds();
+              break outer;
+            }
+          }
+        }
+      }
+
+      // Win condition
+      if (gameState === "playing" && aliens.length === 0) {
+        gameState = "won";
+        setOverlay(true, "Hai vinto! 🎉", "Premi <b>R</b> o clicca <b>Ricomincia</b> per rigiocare.");
+        statusPill.textContent = "Vittoria";
+      }
+    }
+
+    // Render
+    function render() {
+      // Clear
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Stars background (cheap twinkle)
+      const stars = 60, w = canvas.width, h = canvas.height;
+      ctx.globalAlpha = 0.6;
+      for (let i = 0; i < stars; i++) {
+        const x = (i * 131) % w; // deterministic pattern
+        const y = ((i * 197) % h);
+        const s = (i % 5 === 0) ? 2 : 1;
+        ctx.fillStyle = i % 7 === 0 ? "#9ad" : "#ccd";
+        ctx.fillRect(x, y, s, s);
+      }
+      ctx.globalAlpha = 1;
+
+      // Player
+      ctx.fillStyle = player.color;
+      // simple "ship": a rectangle + small triangle
+      ctx.fillRect(player.x, player.y, player.w, player.h);
+      ctx.beginPath();
+      ctx.moveTo(player.x + player.w/2, player.y - player.h * 0.9);
+      ctx.lineTo(player.x + player.w * 0.25, player.y);
+      ctx.lineTo(player.x + player.w * 0.75, player.y);
+      ctx.closePath();
+      ctx.fill();
+
+      // Bullets
+      for (const b of bullets) {
+        ctx.fillStyle = b.color;
+        ctx.fillRect(b.x, b.y, b.w, b.h);
+      }
+
+      // Aliens
+      for (const a of aliens) {
+        ctx.fillStyle = a.color;
+        // little "invader": body + eyes
+        ctx.fillRect(a.x, a.y, a.w, a.h);
+        ctx.fillStyle = "#0b0f1a";
+        const eyeW = a.w * 0.18, eyeH = a.h * 0.22;
+        ctx.fillRect(a.x + a.w*0.18, a.y + a.h*0.28, eyeW, eyeH);
+        ctx.fillRect(a.x + a.w - a.w*0.18 - eyeW, a.y + a.h*0.28, eyeW, eyeH);
+      }
+
+      // HUD line
+      ctx.strokeStyle = "rgba(255,255,255,.08)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, player.y - scaleVal(6));
+      ctx.lineTo(canvas.width, player.y - scaleVal(6));
+      ctx.stroke();
+    }
+
+    // Main loop
+    function loop() {
+      requestAnimationFrame(loop);
+      const t = now();
+      let dt = (t - lastTime) / 1000;
+      // clamp dt to avoid huge jumps on tab switch
+      dt = Math.min(dt, 0.033);
+      lastTime = t;
+
+      if (gameState === "playing") {
+        update(dt);
+      }
+      render();
+    }
+
+    // Boot
+    initGame();
+    lastTime = now();
+    loop();
+
+    // Accessibility: click stage to focus for keyboard on some mobile browsers
+    stage.addEventListener("click", () => stage.focus?.());
+
+  </script>
+</body>
+</html>

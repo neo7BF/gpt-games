@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tris (Tic‑Tac‑Toe) – Statico</title>
+  <style>
+    :root{
+      --bg: #0f172a;         /* slate-900 */
+      --panel: #111827;      /* gray-900 */
+      --panel-2: #1f2937;    /* gray-800 */
+      --text: #e5e7eb;       /* gray-200 */
+      --muted: #9ca3af;      /* gray-400 */
+      --accent: #38bdf8;     /* sky-400 */
+      --x: #60a5fa;          /* blue-400 */
+      --o: #f472b6;          /* pink-400 */
+      --win: #22c55e;        /* green-500 */
+      --shadow: 0 10px 30px rgba(0,0,0,.35);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body{
+      margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      background: radial-gradient(1200px 600px at 70% -10%, #1e293b 0%, var(--bg) 60%);
+      color: var(--text);
+      display:grid; place-items:center;
+      padding: 24px;
+    }
+
+    .app{
+      width: 100%;
+      max-width: 560px;
+      background: linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);
+      border: 1px solid #111827;
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+      padding: 20px;
+    }
+
+    header{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom: 14px; }
+    .title{ font-weight: 800; letter-spacing: .2px; font-size: 20px; }
+    .subtitle{ color: var(--muted); font-size: 13px; }
+
+    .status{
+      display:flex; align-items:center; justify-content:space-between; gap:16px;
+      padding: 12px 14px; border:1px solid #0b1220; background:#0b1220; border-radius: 14px; margin-bottom: 14px;
+    }
+    .status .turn{ font-weight: 700; }
+    .badge{ padding: 4px 10px; border-radius: 999px; border:1px solid #0b1220; background:#0c1220; font-size:12px; }
+    .badge.x{ color: var(--x); }
+    .badge.o{ color: var(--o); }
+
+    .board{
+      --size: 110px; /* cell size on large screens */
+      display:grid; grid-template-columns: repeat(3, 1fr); gap:12px;
+      margin: 12px 0 8px;
+    }
+    @media (max-width: 520px){ .board{ --size: 94px; } }
+    @media (max-width: 420px){ .board{ --size: 84px; } }
+
+    .cell{
+      width: var(--size); height: var(--size);
+      border-radius: 16px; border:1px solid #0b1220; background:#0c1220;
+      display:grid; place-items:center;
+      font-size: calc(var(--size) * .45);
+      font-weight: 900; line-height: 1; cursor: pointer;
+      transition: transform .06s ease, background .2s ease, border-color .2s ease;
+      user-select: none;
+    }
+    .cell:focus{ outline: 2px solid var(--accent); outline-offset: 2px; }
+    .cell:hover{ transform: translateY(-1px); background:#0f1628; }
+    .cell[aria-disabled="true"]{ cursor: not-allowed; opacity: .9; }
+
+    .cell.x{ color: var(--x); }
+    .cell.o{ color: var(--o); }
+    .cell.win{ background: rgba(34,197,94,.08); border-color: rgba(34,197,94,.5); box-shadow: inset 0 0 0 1px rgba(34,197,94,.35); }
+
+    .controls{ display:flex; gap:10px; flex-wrap:wrap; margin-top: 10px; }
+    button{
+      appearance: none; border:1px solid #0b1220; background:#0c1220; color: var(--text);
+      padding: 10px 14px; border-radius: 12px; font-weight: 600; cursor: pointer;
+      transition: transform .06s ease, background .2s ease, border-color .2s ease;
+    }
+    button:hover{ transform: translateY(-1px); background:#101734; }
+    button:active{ transform: translateY(0); }
+
+    .scores{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .scores .count{ font-variant-numeric: tabular-nums; font-weight: 700; }
+
+    footer{ margin-top: 12px; color: var(--muted); font-size: 12px; text-align:center; }
+    a{ color: var(--accent); text-decoration: none; }
+    a:hover{ text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <main class="app" aria-labelledby="appTitle">
+    <header>
+      <div>
+        <div id="appTitle" class="title">Tris (Tic‑Tac‑Toe)</div>
+        <div class="subtitle">Gioco statico in HTML/CSS/JS – pronto per GitHub Pages</div>
+      </div>
+      <div class="scores" aria-live="polite">
+        <span class="badge x" title="Vittorie di X">X: <span id="scoreX" class="count">0</span></span>
+        <span class="badge o" title="Vittorie di O">O: <span id="scoreO" class="count">0</span></span>
+        <span class="badge" title="Pareggi">= <span id="scoreD" class="count">0</span></span>
+      </div>
+    </header>
+
+    <section class="status" aria-live="polite">
+      <div id="statusText">Turno di <span class="badge x">X</span></div>
+      <div>
+        <button id="swapStarter" title="Scambia il giocatore iniziale">Inizia O</button>
+      </div>
+    </section>
+
+    <section class="board" role="grid" aria-label="Griglia del Tris 3 per 3">
+      <!-- Celle generate via JS -->
+    </section>
+
+    <div class="controls">
+      <button id="reset">Nuova partita</button>
+      <button id="clearScores" title="Azzera punteggi">Azzera punteggi</button>
+    </div>
+
+    <footer>
+      Made with ❤, nessuna libreria esterna. Salva questo file come <strong>index.html</strong> e pubblicalo con GitHub Pages.
+    </footer>
+  </main>
+
+  <script>
+    (function(){
+      const boardEl = document.querySelector('.board');
+      const statusText = document.getElementById('statusText');
+      const resetBtn = document.getElementById('reset');
+      const clearBtn = document.getElementById('clearScores');
+      const swapStarterBtn = document.getElementById('swapStarter');
+      const scoreXEl = document.getElementById('scoreX');
+      const scoreOEl = document.getElementById('scoreO');
+      const scoreDEl = document.getElementById('scoreD');
+
+      const WIN_LINES = [
+        [0,1,2],[3,4,5],[6,7,8], // rows
+        [0,3,6],[1,4,7],[2,5,8], // cols
+        [0,4,8],[2,4,6]          // diags
+      ];
+
+      /** @type {("X"|"O"|null)[]} */
+      let board = Array(9).fill(null);
+      /** @type {"X"|"O"} */
+      let starter = 'X';
+      /** @type {"X"|"O"} */
+      let player = starter;
+      let active = true;
+
+      const scores = { X: 0, O: 0, D: 0 };
+
+      function renderBoard(){
+        boardEl.innerHTML = '';
+        board.forEach((val, i) => {
+          const cell = document.createElement('button');
+          cell.className = 'cell' + (val ? ' ' + val.toLowerCase() : '');
+          cell.setAttribute('role', 'gridcell');
+          cell.setAttribute('aria-label', `Cella ${i+1}${val ? ', occupata da ' + val : ''}`);
+          cell.dataset.index = String(i);
+          cell.textContent = val ? val : '';
+          if(!active || val){ cell.setAttribute('aria-disabled','true'); }
+          cell.addEventListener('click', onCellClick);
+          cell.addEventListener('keydown', e => {
+            if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); cell.click(); }
+          });
+          boardEl.appendChild(cell);
+        });
+      }
+
+      function setStatus(msg){ statusText.innerHTML = msg; }
+
+      function updateStatusTurn(){
+        setStatus(`Turno di <span class="badge ${player === 'X' ? 'x' : 'o'}">${player}</span>`);
+      }
+
+      function checkWinner(){
+        for(const [a,b,c] of WIN_LINES){
+          if(board[a] && board[a] === board[b] && board[b] === board[c]){
+            return { winner: board[a], line: [a,b,c] };
+          }
+        }
+        if(board.every(Boolean)) return { winner: null, line: [] }; // draw
+        return null; // game continues
+      }
+
+      function onCellClick(e){
+        const idx = Number(e.currentTarget.dataset.index);
+        if(!active || board[idx]) return;
+        board[idx] = player;
+        e.currentTarget.textContent = player;
+        e.currentTarget.classList.add(player.toLowerCase());
+        e.currentTarget.setAttribute('aria-disabled','true');
+
+        const result = checkWinner();
+        if(result){
+          active = false;
+          if(result.winner){
+            highlightWin(result.line);
+            scores[result.winner]++;
+            updateScores();
+            setStatus(`Vince <span class="badge ${result.winner === 'X' ? 'x' : 'o'}">${result.winner}</span>!`);
+          } else {
+            scores.D++;
+            updateScores();
+            setStatus('Pareggio. Nessun vincitore.');
+          }
+        } else {
+          player = player === 'X' ? 'O' : 'X';
+          updateStatusTurn();
+        }
+      }
+
+      function highlightWin(line){
+        const cells = [...document.querySelectorAll('.cell')];
+        line.forEach(i => cells[i].classList.add('win'));
+      }
+
+      function updateScores(){
+        scoreXEl.textContent = String(scores.X);
+        scoreOEl.textContent = String(scores.O);
+        scoreDEl.textContent = String(scores.D);
+      }
+
+      function reset(matchReset = true){
+        board = Array(9).fill(null);
+        active = true;
+        player = starter;
+        renderBoard();
+        if(matchReset) updateStatusTurn();
+      }
+
+      function clearScores(){
+        scores.X = scores.O = scores.D = 0;
+        updateScores();
+      }
+
+      resetBtn.addEventListener('click', () => reset(true));
+      clearBtn.addEventListener('click', clearScores);
+      swapStarterBtn.addEventListener('click', () => {
+        starter = starter === 'X' ? 'O' : 'X';
+        swapStarterBtn.textContent = `Inizia ${starter === 'X' ? 'O' : 'X'}`; // mostra l'altro
+        reset(true);
+      });
+
+      // Prima render
+      renderBoard();
+      updateStatusTurn();
+    })();
+  </script>
+</body>
+</html>

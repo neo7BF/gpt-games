@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dodge the Blocks — Gioco HTML statico</title>
+  <style>
+    /* --- Layout base --- */
+    html, body {
+      margin: 0; height: 100%; background: #0f172a; color: #e2e8f0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif;
+    }
+    .wrap {
+      display: grid; place-items: center; height: 100%; gap: 16px; padding: 12px;
+    }
+    h1 { font-size: clamp(18px, 2.6vw, 28px); margin: 0; letter-spacing: .5px; }
+    .hud { display: flex; gap: 16px; align-items: center; justify-content: center; flex-wrap: wrap; }
+    .badge { background: #1e293b; border: 1px solid #334155; padding: 6px 10px; border-radius: 12px; font-weight: 600; }
+    .btn { border: 1px solid #334155; background: #0b1223; color: #e2e8f0; padding: 8px 14px; border-radius: 12px; cursor: pointer; }
+    .btn:hover { background: #0d162b; }
+
+    /* Canvas responsive con bordo elegante */
+    .frame { position: relative; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,.35);
+      border: 1px solid #334155; }
+    canvas { display: block; background: linear-gradient(180deg, #111827 0%, #0b1223 100%); }
+
+    /* Controlli touch (solo mobile) */
+    .touch-controls { position: absolute; inset: 0; pointer-events: none; }
+    .touch-btn { position: absolute; bottom: 16px; width: 30%; height: 56px; pointer-events: auto;
+      background: rgba(30,41,59,.45); border: 1px solid #334155; border-radius: 14px; display: grid; place-items: center; user-select: none; }
+    .touch-btn:active { background: rgba(30,41,59,.7); }
+    .touch-left { left: 16px; }
+    .touch-right { right: 16px; }
+
+    /* Overlay (start / game over) */
+    .overlay { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(2,6,23,.55); backdrop-filter: blur(2px); }
+    .card { background: #0b1223; border: 1px solid #334155; border-radius: 18px; padding: 18px 20px; text-align: center; max-width: 90%; }
+    .card h2 { margin: 0 0 8px; }
+    .muted { color: #94a3b8; font-size: 14px; }
+    code { background: #0b1223; border: 1px solid #334155; padding: 2px 6px; border-radius: 8px; }
+
+    /* Fix compat: elementi con [hidden] spariscono anche su vecchi browser */
+    [hidden]{display:none!important;}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>🎮 Dodge the Blocks — HTML/Canvas</h1>
+    <div class="hud">
+      <div class="badge">Punteggio: <span id="score">0</span></div>
+      <div class="badge">Migliore: <span id="best">0</span></div>
+      <button class="btn" id="restartBtn" title="Ricomincia (Barra spaziatrice)">Ricomincia</button>
+    </div>
+
+    <div class="frame" id="frame">
+      <canvas id="game" width="480" height="720" aria-label="Area di gioco"></canvas>
+      <div class="touch-controls" id="touch">
+        <div class="touch-btn touch-left" id="btnLeft">◀</div>
+        <div class="touch-btn touch-right" id="btnRight">▶</div>
+      </div>
+      <div class="overlay" id="overlay">
+        <div class="card">
+          <h2 id="overlayTitle">Dodge the Blocks</h2>
+          <p class="muted" id="overlayMsg">Muovi il blocco <strong>bianco</strong> per evitare gli ostacoli.
+            <br/>Tasti: <code>←</code> <code>→</code> oppure tocca i pulsanti.
+            <br/>Premi <code>Spazio</code> per iniziare.</p>
+          <button class="btn" id="playBtn">Gioca</button>
+        </div>
+      </div>
+    </div>
+
+    <p class="muted">100% statico: un singolo file <code>index.html</code>. Pubblicabile su GitHub Pages.</p>
+  </div>
+
+  <script>
+    // =====================
+    //  Gioco: Dodge the Blocks
+    //  - puro HTML5 canvas
+    //  - nessuna dipendenza
+    //  - perfetto per GitHub Pages
+    // =====================
+
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const bestEl = document.getElementById('best');
+    const overlay = document.getElementById('overlay');
+    const overlayTitle = document.getElementById('overlayTitle');
+    const overlayMsg = document.getElementById('overlayMsg');
+    const restartBtn = document.getElementById('restartBtn');
+    const playBtn = document.getElementById('playBtn');
+
+    // Storage sicuro (gestisce Safari/Private mode)
+    const BEST_KEY = 'bestScore_v1';
+    const storage = {
+      get(key, fallback = 0) {
+        try { return Number(localStorage.getItem(key) ?? fallback); } catch { return fallback; }
+      },
+      set(key, val) {
+        try { localStorage.setItem(key, String(val)); } catch {}
+      }
+    };
+
+    // Dimensioni canvas responsive mantenendo aspect 2:3
+    function fitCanvas() {
+      const maxW = Math.min(560, window.innerWidth - 24);
+      const maxH = window.innerHeight - 180;
+      let w = maxW, h = (maxW * 3) / 2; // 2:3
+      if (h > maxH) { h = maxH; w = (h * 2) / 3; }
+      canvas.style.width = w + 'px';
+      canvas.style.height = h + 'px';
+    }
+    window.addEventListener('resize', fitCanvas); fitCanvas();
+
+    // Stato di gioco
+    const state = {
+      running: false,
+      time: 0,
+      score: 0,
+      best: 0,
+      player: { x: 240 - 20, y: 720 - 80, w: 40, h: 40, speed: 5 },
+      keys: { left: false, right: false },
+      obstacles: [],
+      spawnEvery: 650, // ms
+      lastSpawn: 0,
+      speedScale: 1,
+    };
+    state.best = storage.get(BEST_KEY, 0);
+    bestEl.textContent = state.best;
+
+    // Input tastiera
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'ArrowLeft' || e.code === 'KeyA') { state.keys.left = true; }
+      if (e.code === 'ArrowRight' || e.code === 'KeyD') { state.keys.right = true; }
+      if (e.code === 'Space' || e.key === ' ') { e.preventDefault(); if (!state.running) startGame(); }
+    });
+    window.addEventListener('keyup', (e) => {
+      if (e.code === 'ArrowLeft' || e.code === 'KeyA') state.keys.left = false;
+      if (e.code === 'ArrowRight' || e.code === 'KeyD') state.keys.right = false;
+    });
+
+    // Touch controls
+    const btnLeft = document.getElementById('btnLeft');
+    const btnRight = document.getElementById('btnRight');
+    const touchArea = document.getElementById('touch');
+
+    function bindTouch(btn, dir) {
+      function on(e) { e.preventDefault(); state.keys[dir] = true; }
+      function off(e) { e.preventDefault(); state.keys[dir] = false; }
+      ['pointerdown','touchstart'].forEach(ev => btn.addEventListener(ev, on));
+      ['pointerup','pointercancel','pointerleave','touchend','touchcancel'].forEach(ev => btn.addEventListener(ev, off));
+    }
+    bindTouch(btnLeft, 'left');
+    bindTouch(btnRight, 'right');
+
+    restartBtn.addEventListener('click', () => startGame());
+    playBtn.addEventListener('click', () => startGame());
+    overlay.addEventListener('click', () => { if (!state.running) startGame(); });
+    canvas.addEventListener('click', () => { if (!state.running) startGame(); });
+
+    function startGame() {
+      state.running = true;
+      state.time = 0;
+      state.score = 0;
+      state.obstacles = [];
+      state.lastSpawn = 0;
+      state.speedScale = 1;
+      state.player.x = 240 - state.player.w/2;
+      overlay.hidden = true;
+      last = 0; // Reset del tempo per il loop
+      loop(performance.now());
+    }
+
+    function endGame() {
+      state.running = false;
+      state.best = Math.max(state.best, Math.floor(state.score));
+      storage.set(BEST_KEY, state.best);
+      bestEl.textContent = state.best;
+      overlayTitle.textContent = 'Game Over';
+      overlayMsg.innerHTML = `Punteggio: <strong>${Math.floor(state.score)}</strong><br/>Premi <code>Spazio</code> o tocca per riprovare.`;
+      overlay.hidden = false;
+    }
+
+    function spawnObstacle() {
+      // Larghezza random, posizione random
+      const w = 30 + Math.random() * 70;
+      const x = Math.random() * (480 - w);
+      const speed = 2.2 + Math.random() * 2.0 * state.speedScale;
+      state.obstacles.push({ x, y: -30, w, h: 20 + Math.random()*30, speed });
+    }
+
+    function update(dt, now) {
+      // Movimento player
+      if (state.keys.left) state.player.x -= state.player.speed;
+      if (state.keys.right) state.player.x += state.player.speed;
+      state.player.x = Math.max(0, Math.min(480 - state.player.w, state.player.x));
+
+      // Spawn ostacoli
+      if (now - state.lastSpawn > state.spawnEvery) {
+        spawnObstacle();
+        state.lastSpawn = now;
+      }
+
+      // Aumenta difficoltà gradualmente
+      state.speedScale = 1 + state.time / 30000; // dopo 30s ~2x
+
+      // Aggiorna ostacoli
+      for (const o of state.obstacles) o.y += o.speed;
+      state.obstacles = state.obstacles.filter(o => o.y < 760);
+
+      // Collisioni
+      for (const o of state.obstacles) {
+        if (rectsOverlap(state.player, o)) { endGame(); return; }
+      }
+
+      // Punteggio = tempo sopravvissuto
+      state.time += dt;
+      state.score = state.time / 1000;
+      scoreEl.textContent = Math.floor(state.score);
+    }
+
+    function rectsOverlap(a, b) {
+      return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+    }
+
+    function draw() {
+      // sfondo stellato semplice
+      ctx.clearRect(0, 0, 480, 720);
+      const grad = ctx.createLinearGradient(0,0,0,720);
+      grad.addColorStop(0,'#0b1223');
+      grad.addColorStop(1,'#060b17');
+      ctx.fillStyle = grad; ctx.fillRect(0,0,480,720);
+
+      // stelle
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      for (let i = 0; i < 40; i++) ctx.fillRect((i*71)%480, (i*97 + (state.time/10))%720, 2, 2);
+
+      // player
+      ctx.fillStyle = '#ffffff';
+      roundRect(ctx, state.player.x, state.player.y, state.player.w, state.player.h, 8);
+
+      // ostacoli
+      ctx.fillStyle = '#38bdf8';
+      state.obstacles.forEach(o => roundRect(ctx, o.x, o.y, o.w, o.h, 6));
+
+      // bordo elegante
+      ctx.strokeStyle = '#1f2937';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(1,1,478,718);
+    }
+
+    function roundRect(ctx, x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x+r, y);
+      ctx.arcTo(x+w, y, x+w, y+h, r);
+      ctx.arcTo(x+w, y+h, x, y+h, r);
+      ctx.arcTo(x, y+h, x, y, r);
+      ctx.arcTo(x, y, x+w, y, r);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    let last = 0;
+    function loop(now) {
+      if (!state.running) return;
+      if (!last) last = now;
+      const dt = Math.min(32, now - last); // clamp
+      last = now;
+      update(dt, now);
+      draw();
+      if (state.running) requestAnimationFrame(loop);
+    }
+
+    // Mostra overlay iniziale (visibile finché non parti)
+    overlay.hidden = false;
+  </script>
+</body>
+</html>
